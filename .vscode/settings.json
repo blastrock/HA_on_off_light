@@ -4,5 +4,6 @@
   "idf.openOcdConfigs": [
     "board/esp32c6-bridge.cfg"
   ],
-  "idf.port": "/dev/ttyUSB0"
+  "idf.port": "/dev/ttyUSB0",
+  "idf.flashType": "UART"
 }

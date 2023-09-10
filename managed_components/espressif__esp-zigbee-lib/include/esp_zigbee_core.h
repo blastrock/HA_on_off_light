@@ -5,11 +5,10 @@
  */
 
 #pragma once
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#include "esp_err.h"
 #include "zb_vendor.h"
 #include "zb_config_platform.h"
 #include "esp_zigbee_type.h"
@@ -18,8 +17,16 @@ extern "C" {
 #include "esp_zigbee_endpoint.h"
 #include "zcl/esp_zigbee_zcl_command.h"
 #include "zdo/esp_zigbee_zdo_command.h"
+#include "bdb/esp_zigbee_bdb_touchlink.h"
 #include "esp_zigbee_secur.h"
 #include "esp_zigbee_ota.h"
+
+#define ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK 0x07FFF800U /*!< channel 11-26 for compatibility with 2.4GHZ*/
+
+#ifdef CONFIG_ZB_ZED
+#define ESP_ZB_SLEEP_MINIMUM_THRESHOLD_MS 20U       /*! Default sleep threshold. Do not sleep when it is less then 1 Beacon Interval to wake up*/
+#define ESP_ZB_SLEEP_MAXIMUM_THRESHOLD_MS 86400000U /*! Maximum sleep threshold*/
+#endif                                              /** CONFIG_ZB_ZED */
 
 /** Enum of the Zigbee network device type
  * @anchor esp_zb_nwk_device_type_t
@@ -53,143 +60,102 @@ typedef enum {
     ESP_ZB_ED_AGING_TIMEOUT_16384MIN = 14U, /*!< 16384 minutes */
 } esp_zb_aging_timeout_t;
 
-#define ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK   0x07FFF800U /*!< channel 11-26 for compatibility with 2.4GHZ*/
-
-/** ZCL set attribute callback
- *
- * @param[in] status The status for ZCL set attribute 0 - status success
- * @param[in] endpoint The endpoint of this cluster lists to change
- * @param[in] cluster_id Cluster ID
- * @param[in] attr_id Attribute ID
- * @param[in] value The pointer of the attribute data
- *
- * @note The Zigbee device callback is the default ZCL cluster handler to notify the application about a certain event.
- * It covers attribute changes like on-off, level and color cluster.
- */
-typedef void (*esp_zb_set_attr_callback_t)(uint8_t status, uint8_t endpoint, uint16_t cluster_id, uint16_t attr_id, void *value);
-
-
-/** Report attribute callback
- *
- * @brief A report attribute callback for user to get report info
- *
- * @param[in] addr A struct of address contains short and ieee address @ref esp_zb_zcl_addr_s
- * @param[in] src_endpoint  An endpoint which comes from report device
- * @param[in] dst_endpoint  Destination endpoint number
- * @param[in] cluster_id Cluster id that reported
- * @param[in] attr_id  Attribute id that reported
- * @param[in] attr_type Attribute data type refer to esp_zb_zcl_attr_type_t
- * @param[in] value A pointer to the attribute data value
+/**
+ * @brief Enum of the Zigbee core action callback id
  *
  */
-typedef void (*esp_zb_report_attr_callback_t)(
-    esp_zb_zcl_addr_t *addr, uint8_t src_endpoint, uint8_t dst_endpoint, uint16_t cluster_id, uint16_t attr_id, esp_zb_zcl_attr_type_t attr_type, void *value);
+typedef enum esp_zb_core_action_callback_id_s {
+    ESP_ZB_CORE_SET_ATTR_VALUE_CB_ID                    = 0x0000,   /*!< Set attribute value, refer to esp_zb_zcl_set_attr_value_message_t */
+    ESP_ZB_CORE_SCENES_STORE_SCENE_CB_ID                = 0x0001,   /*!< Store scene, refer to esp_zb_zcl_store_scene_message_t */
+    ESP_ZB_CORE_SCENES_RECALL_SCENE_CB_ID               = 0x0002,   /*!< Recall scene, refer to esp_zb_zcl_recall_scene_message_t */
+    ESP_ZB_CORE_IAS_ZONE_ENROLL_RESPONSE_VALUE_CB_ID    = 0x0003,   /*!< IAS Zone enroll response, refer to esp_zb_zcl_ias_zone_enroll_response_message_t */
+    ESP_ZB_CORE_OTA_UPGRADE_VALUE_CB_ID                 = 0x0004,   /*!< Upgrade OTA, refer to esp_zb_zcl_ota_update_message_t */
+    ESP_ZB_CORE_CMD_READ_ATTR_RESP_CB_ID                = 0x1000,   /*!< Read attribute response, refer to esp_zb_zcl_cmd_read_attr_resp_message_t */
+    ESP_ZB_CORE_CMD_WRITE_ATTR_RESP_CB_ID               = 0x1001,   /*!< Write attribute response, refer to esp_zb_zcl_cmd_write_attr_resp_message_t */
+    ESP_ZB_CORE_CMD_REPORT_CONFIG_RESP_CB_ID            = 0x1002,   /*!< Configure reprot response, refer to esp_zb_zcl_cmd_config_report_resp_message_t */
+    ESP_ZB_CORE_CMD_READ_REPORT_CFG_RESP_CB_ID          = 0x1003,   /*!< Read report configuration response, refer to esp_zb_zcl_cmd_read_report_config_resp_message_t */
+    ESP_ZB_CORE_CMD_OPERATE_GROUP_RESP_CB_ID            = 0x1010,   /*!< Group add group response, refer to esp_zb_zcl_groups_operate_group_resp_message_t */
+    ESP_ZB_CORE_CMD_VIEW_GROUP_RESP_CB_ID               = 0x1011,   /*!< Group view response, refer to esp_zb_zcl_groups_view_group_resp_message_t */
+    ESP_ZB_CORE_CMD_GET_GROUP_MEMBERSHIP_RESP_CB_ID     = 0x1012,   /*!< Group get membership response, refer to esp_zb_zcl_groups_get_group_membership_resp_message_t */
+    ESP_ZB_CORE_CMD_OPERATE_SCENE_RESP_CB_ID            = 0x1020,   /*!< Scenes operate response, refer to esp_zb_zcl_scenes_operate_scene_resp_message_t */
+    ESP_ZB_CORE_CMD_VIEW_SCENE_RESP_CB_ID               = 0x1021,   /*!< Scenes view response, refer to esp_zb_zcl_scenes_view_scene_resp_message_t */
+    ESP_ZB_CORE_CMD_GET_SCENE_MEMBERSHIP_RESP_CB_ID     = 0x1022,   /*!< Scenes get membership response, refer to esp_zb_zcl_scenes_get_scene_membership_resp_message_t */
+    ESP_ZB_CORE_CMD_IAS_ZONE_ZONE_ENROLL_REQUEST_ID     = 0x1030,   /*!< IAS Zone enroll request, refer to esp_zb_zcl_ias_zone_enroll_request_message_t */
+    ESP_ZB_CORE_CMD_IAS_ZONE_ZONE_STATUS_CHANGE_NOT_ID  = 0x1031,   /*!< IAS Zone status change notification, refer to esp_zb_zcl_ias_zone_status_change_notification_message_t */
+    ESP_ZB_CORE_CMD_CUSTOM_CLUSTER_REQ_CB_ID            = 0x1040,   /*!< Custom Cluster request, refer to esp_zb_zcl_custom_cluster_command_message_t */
+    ESP_ZB_CORE_CMD_CUSTOM_CLUSTER_RESP_CB_ID           = 0x1041,   /*!< Custom Cluster response, refer to esp_zb_zcl_custom_cluster_command_message_t */
+    ESP_ZB_CORE_CMD_PRIVILEGE_COMMAND_REQ_CB_ID         = 0x1050,   /*!< Custom Cluster request, refer to esp_zb_zcl_privilege_command_message_t */
+    ESP_ZB_CORE_CMD_PRIVILEGE_COMMAND_RESP_CB_ID        = 0x1051,   /*!< Custom Cluster response, refer to esp_zb_zcl_privilege_command_message_t */
+    ESP_ZB_CORE_REPORT_ATTR_CB_ID                       = 0x2000,   /*!< Attribute Report, refer to esp_zb_zcl_report_attr_message_t */
+} esp_zb_core_action_callback_id_t;
 
-/** Read attribute response callback
- *
- * @brief A read attribute response callback for user to get read info.
- *
- * @param[in] status   Status of the read attribute response refer to esp_zb_zcl_status 0 - status success, 134 - unsupported attribute
- * @param[in] cluster_id Cluster id that read
- * @param[in] attr_id  Attribute id that read
- * @param[in] attr_type Attribute data type refer to esp_zb_zcl_attr_type_t
- * @param[in] value A pointer to the attribute data value
+/**
+ * @brief The Zigbee Coordinator/ Router device configuration.
  *
  */
-typedef void (*esp_zb_read_attr_resp_callback_t)(esp_zb_zcl_status_t status, uint16_t cluster_id, uint16_t attr_id, esp_zb_zcl_attr_type_t attr_type, void *value);
+typedef struct {
+    uint8_t max_children; /*!< Max number of the children */
+} esp_zb_zczr_cfg_t;
 
-/** Groups cluster add group response callback
- *
- * @brief Add group cluster callback for user to get group id info
- *
- * @param[in] status Status of the add group cluster response, refer to esp_zb_zcl_status_t success status - 0  invalid value status - 135
- * @param[in] group_id Group id that added
+/**
+ * @brief The Zigbee End device configuration.
  *
  */
-typedef void (*esp_zb_add_group_resp_callback_t)(esp_zb_zcl_status_t status, uint16_t group_id);
+typedef struct {
+    uint16_t ed_timeout; /*!< Set End Device Timeout */
+    uint16_t keep_alive; /*!< Set Keep alive Timeout */
+} esp_zb_zed_cfg_t;
 
-/** Groups cluster remove group response callback
- *
- * @brief Remove group cluster callback for user to get group id info
- *
- * @param[in] status Status of the remove group cluster response, refer to esp_zb_zcl_status_t success status - 0  invalid value status - 135
- * @param[in] group_id Group id that removed
+/**
+ * @brief The Zigbee device configuration.
+ * @note  For esp_zb_role please refer defined by @ref esp_zb_nwk_device_type_t.
+ */
+typedef struct esp_zb_cfg_s {
+    esp_zb_nwk_device_type_t esp_zb_role; /*!< The nwk device type */
+    bool install_code_policy;             /*!< Allow install code security policy or not */
+    union {
+        esp_zb_zczr_cfg_t zczr_cfg; /*!< The Zigbee zc/zr device configuration */
+        esp_zb_zed_cfg_t zed_cfg;   /*!< The Zigbee zed device configuration */
+    } nwk_cfg;                      /*!< Union of the network configuration */
+} esp_zb_cfg_t;
+
+/**
+ * @brief The application signal struct for esp_zb_app_signal_handler
  *
  */
-typedef void (*esp_zb_remove_group_resp_callback_t)(esp_zb_zcl_status_t status, uint16_t group_id);
+typedef struct esp_zb_app_signal_s {
+    uint32_t *p_app_signal;   /*!< Application pointer signal type, refer to esp_zb_app_signal_type_t */
+    esp_err_t esp_err_status; /*!< The error status of the each signal event, refer to esp_err_t */
+} esp_zb_app_signal_t;
 
-/** Groups cluster view group response callback
+/**
+ * @brief A callback for user to obtain interesting Zigbee message
  *
- * @brief View group cluster callback for user to get group id info
+ * @note The returned value will be utilized by the stack for post-processing
+ * @param[in] callback_id The id of Zigbee core action, refer to esp_zb_core_action_callback_id_t
+ * @param[in] message The information of Zigbee core action that bind with the @p callback_id
  *
- * @param[in] status Status of the view group cluster response, refer to esp_zb_zcl_status_t success status - 0  invalid value status - 135
- * @param[in] group_id Group id that to be viewed
- *
+ * @return ESP_OK The action is handled successfully, others on failure
  */
-typedef void (*esp_zb_view_group_resp_callback_t)(esp_zb_zcl_status_t status, uint16_t group_id);
+typedef esp_err_t (*esp_zb_core_action_callback_t)(esp_zb_core_action_callback_id_t callback_id, const void *message);
 
-/** Groups cluster get group membership response callback
+/**
+ * @brief A callback for user to obtain device_cb_id buffer id of ZBoss stack
  *
- * @brief Get group cluster membership callback for user to get group info
- *
- * @param[in] status Status of the get membership group cluster response, refer to esp_zb_zcl_status_t success status - 0  fail status - 1
- * @param[in] group_table_capacity Group table capacity that reported
- * @param[in] group_count Group count that reported
- * @param[in] group_id_list Group id list that acquired
- *
+ * @return
+ *      -   True: processed
+ *      -   False: unprocessed
  */
-typedef void (*esp_zb_get_group_membership_resp_callback_t)(esp_zb_zcl_status_t status, uint8_t group_table_capacity, uint8_t group_count, uint16_t *group_id_list);
+typedef bool (*esp_zb_zcl_device_cb_id_callback_t)(uint8_t bufid);
 
-/** Scenes cluster view scene response callback
+/**
+ * @brief A callback for user to obtain raw command bufid of ZBoss stack
  *
- * @brief View Scenes cluster callback for user to get scene information
- *
- * @param[out] resp The response information for viewing scene @ref esp_zb_zcl_scenes_view_scene_resp_s
- *
+ * @return
+ *      -   True: processed
+ *      -   False: unprocessed
  */
-typedef void (*esp_zb_zcl_scenes_view_scene_resp_callback_t)(esp_zb_zcl_scenes_view_scene_resp_t resp);
-
-/** Scenes cluster store command callback
- *
- * @brief Store scenes state callback for user to save data entry.
- *
- * @note The SDK provides esp_zb_zcl_scenes_table_store() function to store scene for user.
- * @param[out] status Status of the store scene command, refer to esp_zb_zcl_status_t success status - 0  invalid field status - 133
- * @param[out] group_id The group id of storing scene request
- * @param[out] scene_id The scene id of storing scene request
- */
-typedef void (*esp_zb_scenes_store_cmd_callback_t)(esp_zb_zcl_status_t status, uint16_t group_id, uint8_t scene_id);
-
-/** Scenes cluster recall command callback
- *
- * @brief Recall scenes callback for user to recall specific entry.
- *
- * @param[in] status Status of the recall scene command, refer to esp_zb_zcl_status_t success status - 0  status not found - 139
- * @param[in] field_data A pointer to scenes extension field @ref esp_zb_zcl_scenes_extension_field_s
- *
- */
-typedef void (*esp_zb_scenes_recall_cmd_callback_t)(esp_zb_zcl_status_t status, esp_zb_zcl_scenes_extension_field_t *field_data);
-
-/** OTA upgrade status callback
- *
- * @brief OTA upgrade callback for user to get upgrade status
- *
- * @param[in] status Status of the OTA upgrade refer to esp_zb_zcl_ota_upgrade_status_t started OTA upgrade - 0
- * received OTA upgrade - 2  finished OTA upgrade - 3
- *
- */
-typedef void (*esp_zb_ota_upgrade_status_callback_t)(esp_zb_zcl_ota_upgrade_status_t status);
-
-/** Customized cluster command callback
- *
- * @brief A customized cluster command received from remote node and callback for user to get value info
- *
- * @param[in] status Status of the custom command request
- * @param[in] data_type Data type of the added data value refer to esp_zb_zcl_attr_type_t
- * @param[in] value A pointer to the attribute data value based on supported data types @ref esp_zb_zcl_custom_cluster_cmd_req_s
- *
- */
-typedef void (*esp_zb_custom_cluster_cmd_callback_t)(uint8_t status, esp_zb_zcl_attr_type_t data_type, void *value);
+typedef bool (*esp_zb_zcl_raw_command_callbcak_t)(uint8_t bufid);
 
 /** CLI response callback
  *
@@ -205,98 +171,96 @@ typedef uint8_t (*esp_zb_cli_resp_callback_t)(uint8_t bufid);
  */
 typedef void (*esp_zb_identify_notify_callback_t)(uint8_t identify_on);
 
-/** ZCL command callback
- * @param[out] cmd The zcl command content refers to esp_zb_zcl_cmd_info_t
- * 
- */
-typedef void (*esp_zb_privilege_command_callback_t)(esp_zb_zcl_cmd_info_t cmd);
-
-/** IAS zone cluster command callback
+/**
+ * @brief Register the Zigbee core action handler
  *
- * @brief A IAS zone cluster command received from remote node and callback for user to get the Enroll Request Information
- *
- * @param[out] zone_type The type of IAS zone that refers to esp_zb_zcl_ias_zone_zonetype_t
- * @param[out] manuf The manfacturer code
+ * @param[in] cb A callback that user can handle the Zigbee action, refer to esp_zb_core_callback_t
  *
  */
-typedef void (*esp_zb_ias_zone_enroll_request_callback_t)(uint16_t zone_type, uint16_t manuf);
-
-/** IAS zone cluster command callback
- *
- * @brief A IAS zone cluster command received from remote node and callback for user to get the Enroll Eesponse information
- *
- * @param[out] code The Zone Enroll response code that can refer to esp_zb_zcl_ias_zone_enroll_response_code_t
- * @param[out] zone_id A unique reference number allocated by the CIE at zone enrollment time
- *
- */
-typedef void (*esp_zb_ias_zone_enroll_response_callback_t)(uint8_t code, uint8_t zone_id);
-
-/** IAS zone cluster command callback
- *
- * @brief A IAS zone cluster command received from remote node and callback for user to get the Zone Status
- *
- * @note: The Zone Status Change Notification command is generated when a change takes place in one or more bits of the ZoneStatus attribute.
- *
- * @param[out] zone_status The current value of the Zone Status attribute
- * @param[out] extended_status The reserved for additional status information, default is zero
- * @param[out] zone_id A unique reference number allocated by the CIE at zone enrollment time
- * @param[out] delay defined as the amount of time, in quarter-seconds, from the moment when a change takes place in one or more bits of the Zone
- * Status attribute and the successful transmission of the Zone Status Change Notification.
- */
-typedef void (*esp_zb_ias_zone_status_notification_cmd_callback_t)(uint16_t zone_status, uint8_t extended_status, uint8_t zone_id, uint16_t delay);
-
-/** Active scan network callback
- *
- * @brief A ZDO active scan request callback for user to get scan list status.
- *
- * @note User's callback get response from the device that found in network.
- *
- * @param[in] zdo_status The ZDO response status, refer to `esp_zb_zdp_status`
- * @param[in] count     Number of discovered networks
- * @param[in] nwk_descriptor The pointer to all discvoered networks see refer to esp_zb_network_descriptor_t
- *
- */
-typedef void (*esp_zb_zdo_scan_complete_callback_t)(esp_zb_zdp_status_t zdo_status, uint8_t count, esp_zb_network_descriptor_t *nwk_descriptor);
+void esp_zb_core_action_handler_register(esp_zb_core_action_callback_t cb);
 
 /**
- * @brief The Zigbee Coordinator/ Router device configuration.
+ * @brief Register the Zigbee device_cb_id handler
+ *
+ * @param[in] cb A callback that user can handle the Zigbee raw device_cb_id buffer id, refer to esp_zb_core_callback_t
  *
  */
-typedef struct {
-    uint8_t  max_children;          /*!< Max number of the children */
-} esp_zb_zczr_cfg_t;
+void esp_zb_device_cb_id_handler_register(esp_zb_zcl_device_cb_id_callback_t cb);
 
 /**
- * @brief The Zigbee End device configuration.
+ * @brief Register the raw Zigbee command handler
+ *
+ * @param[in] cb A callback that user can handle the Zigbee raw command buffer id, refer to esp_zb_zcl_raw_command_callbcak_t
  *
  */
-typedef struct {
-    uint16_t   ed_timeout;          /*!< Set End Device Timeout */
-    uint16_t  keep_alive;           /*!< Set Keep alive Timeout */
-} esp_zb_zed_cfg_t;
+void esp_zb_raw_command_handler_register(esp_zb_zcl_raw_command_callbcak_t cb);
 
 /**
- * @brief The Zigbee device configuration.
- * @note  For esp_zb_role please refer defined by @ref esp_zb_nwk_device_type_t.
- */
-typedef struct esp_zb_cfg_s {
-    esp_zb_nwk_device_type_t esp_zb_role;           /*!< The nwk device type */
-    bool   install_code_policy;                     /*!< Allow install code security policy or not */
-    union {
-        esp_zb_zczr_cfg_t   zczr_cfg;               /*!< The Zigbee zc/zr device configuration */
-        esp_zb_zed_cfg_t    zed_cfg;                /*!< The Zigbee zed device configuration */
-    } nwk_cfg;                                      /*!< Union of the network configuration */
-} esp_zb_cfg_t;
-
-/**
- * @brief The application signal struct for esp_zb_app_signal_handler
+ * @brief   Set the Command line interface (CLI) handler callback.
+ *
+ * @note  Set a command handler callback for handle response from other device to CLI device.
+ * @param[in] cb A CLI command handler callback that user used refer to esp_zb_cli_resp_callback_t
  *
  */
-typedef struct esp_zb_app_signal_s {
-    uint32_t        *p_app_signal;      /*!< Application pointer signal type, refer to esp_zb_app_signal_type_t */
-    esp_err_t       esp_err_status;     /*!< The error status of the each signal event, refer to esp_err_t */
-} esp_zb_app_signal_t;
-/********************* Declare functions **************************/
+void esp_zb_cli_resp_handler_register(esp_zb_cli_resp_callback_t cb);
+
+/**
+ * @brief   Set the ZCL identify notify callback for specific endpoint.
+ *
+ * @note  Set a callback for user to handle identify command.
+ *
+ * @param[in] endpoint A specific endpoint
+ * @param[in] cb A identify notify callback that user used
+ *
+ */
+void esp_zb_identify_notify_handler_register(uint8_t endpoint, esp_zb_identify_notify_callback_t cb);
+
+/**
+ * @brief Add a callback and the privilege command the Zigbee cluster in endpoint.
+ *
+ * @note The privilege command will skip the Zigbee stack and be exposed to users by the callback indirectly.
+ *       Allowing different commands to use the same callback.
+ *
+ * @param[in] endpoint The specific endpoint for @p cluster
+ * @param[in] cluster The specific cluster for @p command
+ * @param[in] command The specific command ID is required to handle for users.
+ * @return 
+ *      - ESP_OK: on success
+ *      - ESP_FAIL: on failure
+ */
+esp_err_t esp_zb_zcl_add_privilege_command(uint8_t endpoint, uint16_t cluster, uint16_t command);
+
+/**
+ * @brief Delete the privilege command from the @p cluster of @p endpoint
+ *
+ * @param[in] endpoint The specific endpoint for @p cluster
+ * @param[in] cluster The specific cluster for @p command
+ * @param[in] command The specific command ID will be deleted so that the stack will handle the command rather than user.
+ * @return
+ *      -   True: On success
+ *      -   False: Nothing to delete
+ */
+bool esp_zb_zcl_delete_privilege_command(uint8_t endpoint, uint16_t cluster, uint16_t command);
+
+/**
+ * @brief Set the ZCL scenes cluster scene table for users.
+ *
+ * @param[in] group_id          The group id of scene, which will be used to find scenes table record
+ * @param[in] scene_id          The scene id of scene, which will be used to find scenes table record
+ * @param[in] transition_time   The transition time of scene, whose unit is 100 milliseconds
+ * @param[in] field             The pointer to zcl senes extension field list
+ * @return
+ *      - ESP_OK: on success
+ *      - ESP_FAIL: the group id or scene id is invalid
+ */
+esp_err_t esp_zb_zcl_scenes_table_store(uint16_t group_id, uint8_t scene_id, uint16_t transition_time, esp_zb_zcl_scenes_extension_field_t *field);
+
+/**
+ * @brief View the zcl scene table
+ *
+ */
+void esp_zb_zcl_scenes_table_show(void);
+
 /**
  * @brief  Zigbee stack initialization.
  *
@@ -334,15 +298,37 @@ esp_err_t esp_zb_set_primary_network_channel_set(uint32_t channel_mask);
 esp_err_t esp_zb_set_secondary_network_channel_set(uint32_t channel_mask);
 
 /**
- * @brief   Active scan available network.
- *
- * Network discovery service for scanning available network
+ * @brief   Set the 2.4G channel mask.
  *
  * @param[in] channel_mask Valid channel mask is from 0x00000800 (only channel 11) to 0x07FFF800 (all channels from 11 to 26)
- * @param[in] scan_duration Time to spend scanning each channel
- * @param[in] user_cb   A user callback to get the active scan result please refer to esp_zb_zdo_scan_complete_callback_t
+ * @return  - ESP_OK on success
+            - ESP_ERR_INVALID_ARG if the channel mask is out of range
  */
-void esp_zb_active_scan_request(uint32_t channel_mask, uint8_t scan_duration, esp_zb_zdo_scan_complete_callback_t user_cb);
+esp_err_t esp_zb_set_channel_mask(uint32_t channel_mask);
+
+/**
+ * @brief   Set zigbee rx on when idle.
+ *
+ * @param[in] rx_on enable/disable rx on when idle.
+ *
+ */
+void esp_zb_set_rx_on_when_idle(bool rx_on);
+
+/**
+ * @brief   Check if device is factory new.
+ *
+ * @return - True factory new.
+ *
+ */
+bool esp_zb_bdb_is_factory_new(void);
+
+/**
+ * @brief Set Touchlink NWK channel
+ *
+ * @param[in] channel Touchlink NWK channel value
+ *
+ */
+void esp_zb_zdo_touchlink_set_nwk_channel(uint8_t channel);
 
 /**
  * @brief   Set the Zigbee device long address.
@@ -350,7 +336,7 @@ void esp_zb_active_scan_request(uint32_t channel_mask, uint8_t scan_duration, es
  * @note  Set this function AFTER @ref esp_zb_init called, if user wants to set specific address
  * without reading MAC address from flash refer to tools/mfg_tool or eFUSE.
  *
- * @param[in] addr Pointer of long address
+ * @param[in] addr An 64-bit of IEEE long address, which is presented in little-endian.
  * @return - ESP_OK on success
  */
 esp_err_t esp_zb_set_long_address(esp_zb_ieee_addr_t addr);
@@ -360,7 +346,7 @@ esp_err_t esp_zb_set_long_address(esp_zb_ieee_addr_t addr);
  *
  * @note This function will return a pointer to 64-bit of ieee long address.
  *
- * @param[out] addr pointer of long address
+ * @param[out] addr An 64-bit of IEEE long address, which is presented in little-endian.
  *
  */
 void esp_zb_get_long_address(esp_zb_ieee_addr_t addr);
@@ -374,11 +360,18 @@ void esp_zb_get_long_address(esp_zb_ieee_addr_t addr);
 uint16_t esp_zb_get_short_address(void);
 
 /**
+ * @brief Set the Zigbee network extended PAN ID.
+ *
+ * @param ext_pan_id An 64-bit of extended PAN ID, which is presented in little-endian.
+ */
+void esp_zb_set_extended_pan_id(const esp_zb_ieee_addr_t ext_pan_id);
+
+/**
  * @brief   Get the Zigbee network extended PAN ID.
  *
  * @note This function will return back a pointer to 64-bit of extended PAN ID.
  *
- * @param[out] ext_pan_id pointer of extended PAN ID
+ * @param[out] ext_pan_id An 64-bit of extended PAN ID, which is presented in little-endian.
  *
  */
 void esp_zb_get_extended_pan_id(esp_zb_ieee_addr_t ext_pan_id);
@@ -420,11 +413,22 @@ void esp_zb_get_tx_power(int8_t *power);
 /**
  * @brief  Get the network short address by the IEEE address
  *
- * @param[in] address 8-byte for the IEEE address
+ * @param[in] address An 64-bit for the IEEE address, which is presented in little-endian.
  * @return Network short address
  *
  */
 uint16_t esp_zb_address_short_by_ieee(esp_zb_ieee_addr_t address);
+
+/**
+ * @brief Get the network IEEE address by the short address
+ *
+ * @param[in] short_addr The 2-byte address which will been used to search the mapped IEEE address
+ * @param[out] ieee_addr The 64-bit of address for Zigbee IEEE address, which is presented in little-endian.
+ * @return
+ *      - ESP_OK: on success
+ *      - ESP_ERR_NOT_FOUND: not found the IEEE address
+ */
+esp_err_t esp_zb_ieee_address_by_short(uint16_t short_addr, uint8_t *ieee_addr);
 
 /**
  * @brief   Get the Zigbee network device type.
@@ -543,9 +547,9 @@ void *esp_zb_app_signal_get_params(uint32_t *signal_p);
  *
  * @note Function will be called via scheduler after timeout expired in millisecond. Timer resolution depends on implementation. Same callback can be scheduled for execution more then once.
  *
- * @param cb - function to call via scheduler
- * @param param - parameter to pass to the function
- * @param time - timeout, in millisecond
+ * @param[in] cb - function to call via scheduler
+ * @param[in] param - parameter to pass to the function
+ * @param[in] time - timeout, in millisecond
  */
 void esp_zb_scheduler_alarm(esp_zb_callback_t cb, uint8_t param, uint32_t time);
 
@@ -554,223 +558,18 @@ void esp_zb_scheduler_alarm(esp_zb_callback_t cb, uint8_t param, uint32_t time);
  *
  * @note This function cancel previously scheduled alarm.
  *
- * @param cb - function to cancel
- * @param param - parameter to pass to the function to cancel
+ * @param[in] cb - function to cancel
+ * @param[in] param - parameter to pass to the function to cancel
  */
 void esp_zb_scheduler_alarm_cancel(esp_zb_callback_t cb, uint8_t param);
 
-/* callback register */
 /**
- * @brief   Add set ZCL attribute change device callback.
- * @note    User is able to enabling some device action based on the callback arguments.
+ * @brief  Set BDB commissioning mode.
  *
- * @param[in] cb A device callback that user used refer to esp_zb_set_attr_callback_t
+ * @param[in] commissioning_mode commissioning mode that refer to esp_zb_bdb_commissioning_mode_mask_t.
  *
  */
-void esp_zb_device_add_set_attr_value_cb(esp_zb_set_attr_callback_t cb);
-
-/**
- * @brief   Set the ZCL report attribute device callback.
- *
- * @note  Set a callback being called on receive attribute report. The callback will
- *  be provided with all data necessary for correct attribute handling.
- *
- * @param[in] cb A report attribute callback that user used refer to esp_zb_report_attr_callback_t
- *
- */
-void esp_zb_device_add_report_attr_cb(esp_zb_report_attr_callback_t cb);
-
-/**
- * @brief   Set the ZCL read attribute response callback for specific endpoint.
- *
- * @note  Set a callback being called on receive read attribute response. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] endpoint A specific endpoint
- * @param[in] cb A read attribute callback that user used refer to esp_zb_read_attr_resp_callback_t
- *
- */
-void esp_zb_add_read_attr_resp_cb(uint8_t endpoint, esp_zb_read_attr_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL groups cluster add group response callback for specific endpoint for client.
- *
- * @note  Set a callback being called on receive add group cluster response. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] endpoint A specific endpoint
- * @param[in] cb Add group cluster callback that user used refer to esp_zb_add_group_resp_callback_t
- *
- */
-void esp_zb_groups_add_group_resp_cb(uint8_t endpoint, esp_zb_add_group_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL groups cluster remove group response callback for specific endpoint for client.
- *
- * @note  Set a callback being called on receive remove group cluster response. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] endpoint A specific endpoint
- * @param[in] cb Remove group cluster callback that user used refer to esp_zb_remove_group_resp_callback_t
- *
- */
-void esp_zb_groups_remove_group_resp_cb(uint8_t endpoint, esp_zb_remove_group_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL groups cluster view group response callback for specific endpoint for client.
- *
- * @note  Set a callback being called on receive view group cluster response. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] endpoint A specific endpoint
- * @param[in] cb View group cluster callback that user used refer to esp_zb_view_group_resp_callback_t
- *
- */
-void esp_zb_groups_view_group_resp_cb(uint8_t endpoint, esp_zb_view_group_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL groups cluster get group membership response callback for specific endpoint for client.
- *
- * @note  Set a callback being called on receive get group cluster membership response. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] endpoint A specific endpoint
- * @param[in] cb Get group cluster membership callback that user used refer to esp_zb_get_group_membership_resp_callback_t
- *
- */
-void esp_zb_groups_get_group_membership_resp_cb(uint8_t endpoint, esp_zb_get_group_membership_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL scenes cluster get scene information response callback for specific endpoint for client.
- *
- * @param[in] endpoint A specific endpoint
- * @param[in] cb Get scenes cluster view scene callback that user used can refer to esp_zb_zcl_scenes_view_scene_resp_callback_t
- *
- */
-void esp_zb_scenes_view_scene_resp_cb(uint8_t endpoint, esp_zb_zcl_scenes_view_scene_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL scenes cluster store command callback for server.
- *
- * @note  Set a callback (optional) being called on receive scenes store command. The callback provides the
- *  content of exactly extension field stored to the scenes table.
- * @param[in] cb A scenes cluster store callback that user used refer to esp_zb_scenes_store_cmd_callback_t
- *
- */
-void esp_zb_add_scenes_store_cmd_cb(esp_zb_scenes_store_cmd_callback_t cb);
-
-/**
- * @brief Set the ZCL scenes cluster scene table for users.
- *
- * @param[in] group_id          The group id of scene, which will be used to find scenes table record
- * @param[in] scene_id          The scene id of scene, which will be used to find scenes table record
- * @param[in] transition_time   The transition time of scene, whose unit is 100 milliseconds
- * @param[in] field             The pointer to zcl senes extension field list
- * @return
- *      - ESP_OK: on success
- *      - ESP_FAIL: the group id or scene id is invalid
- */
-esp_err_t esp_zb_zcl_scenes_table_store(uint16_t group_id, uint8_t scene_id, uint16_t transition_time, esp_zb_zcl_scenes_extension_field_t *field);
-
-/**
- * @brief   Set the ZCL scenes cluster recall command callback for server.
- *
- * @note  Set a callback (optional) being called on receive scenes recall command. The callback provides the
- *  content of exactly extension field is recalled from the scenes table.
- * @param[in] cb A scenes cluster recall callback that user used refer to esp_zb_scenes_recall_cmd_callback_t
- *
- */
-void esp_zb_add_scenes_recall_cmd_cb(esp_zb_scenes_recall_cmd_callback_t cb);
-
-/**
- * @brief Set the ZCL IAS Zone to handle the received enroll response command for server.
- *
- * @param cb A ias zone cluster enroll response callback that user used refer to esp_zb_ias_zone_enroll_response_callback_t
- *
- */
-void esp_zb_add_ias_zone_enroll_response_cb(esp_zb_ias_zone_enroll_response_callback_t cb);
-
-/**
- * @brief   Set the ZCL OTA upgrade status callback for client.
- *
- * @note  Set a callback being called on receive OTA upgrade response. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] cb A device callback that user used refer to esp_zb_ota_upgrade_status_callback_t
- *
- */
-void esp_zb_device_add_ota_upgrade_status_cb(esp_zb_ota_upgrade_status_callback_t cb);
-
-/**
- * @brief   Set the ZCL customized cluster command request callback for specific endpoint.
- *
- * @note  Set a callback being called on receive customized cluster command request. The callback will
- *  be provided with all data necessary for correct attribute handling.
- * @param[in] endpoint A specific endpoint
- * @param[in] cluster_id A customized cluster id
- * @param[in] cb A customized cluster callback that user used refer to esp_zb_custom_cluster_cmd_callback_t
- *
- */
-void esp_zb_add_custom_cluster_command_cb(uint8_t endpoint, uint16_t cluster_id, esp_zb_custom_cluster_cmd_callback_t cb);
-
-/**
- * @brief   Set the Command line interface (CLI) handler callback for specific endpoint.
- *
- * @note  Set a command handler callback for handle response from other device to CLI device.
- * @param[in] endpoint A specific endpoint
- * @param[in] cb A CLI command handler callback that user used refer to esp_zb_cli_resp_callback_t
- *
- */
-void esp_zb_add_cli_resp_handler_cb(uint8_t endpoint, esp_zb_cli_resp_callback_t cb);
-
-/**
- * @brief   Set the ZCL identify notify callback for specific endpoint.
- *
- * @note  Set a callback for user to handle identify command.
- *
- * @param[in] endpoint A specific endpoint
- * @param[in] cb A identify notify callback that user used
- *
- */
-void esp_zb_add_identify_notify_cb(uint8_t endpoint, esp_zb_identify_notify_callback_t cb);
-
-/**
- * @brief Add a callback and the privilege command the Zigbee cluster in endpoint.
- *
- * @note The privilege command will skip the Zigbee stack and be exposed to users by the callback indirectly.
- *       Allowing different commands to use the same callback.
- *
- * @param[in] endpoint The specific endpoint for @p cluster
- * @param[in] cluster The specific cluster for @p command
- * @param[in] command The specific command ID is required to handle for users.
- * @param[in] cb The callback refers to esp_zb_privilege_command_callback_t callback will be called, when application layer receives the @p command
- *
- */
-void esp_zb_add_cluster_privilege_command_cb(uint8_t endpoint, uint16_t cluster, uint16_t command, esp_zb_privilege_command_callback_t cb);
-
-/**
- * @brief Delete the privilege command from the @p cluster of @p endpoint
- *
- * @param[in] endpoint The specific endpoint for @p cluster
- * @param[in] cluster The specific cluster for @p command
- * @param[in] command The specific command ID will be deleted so that the stack will handle the command rather than user.
- * @return
- *      -   True: On success
- *      -   False: Nothing to delete
- */
-bool esp_zb_delete_cluster_privilege_command(uint8_t endpoint, uint16_t cluster, uint16_t command);
-
-/**
- * @brief Set a callback to handle the received ias zone enroll request command for client.
- *
- * @param endpoint A specific endpoint
- * @param cb A ias zone cluster enroll request callback that user used refer to esp_zb_ias_zone_enroll_request_callback_t
- *
- */
-void esp_zb_add_ias_zone_enroll_request_cb(uint8_t endpoint, esp_zb_ias_zone_enroll_request_callback_t cb);
-
-/**
- * @brief Set a callback to handle the received ias zone status change notification for client.
- *
- * @param endpoint A specific endpoint
- * @param cb A ias zone cluster zone status change notification callback that user used refer to esp_zb_ias_zone_status_notification_cmd_callback_t
- *
- */
-void esp_zb_add_ias_zone_status_notification_cb(uint8_t endpoint, esp_zb_ias_zone_status_notification_cmd_callback_t cb);
+void esp_zb_set_bdb_commissioning_mode(esp_zb_bdb_commissioning_mode_mask_t commissioning_mode);
 
 /* ZCL attribute, cluster, endpoint, device related */
 
@@ -799,6 +598,63 @@ void esp_zb_rcp_init(void);
  *
  */
 void esp_zb_rcp_main_loop_iteration(void);
+
+#ifdef ZB_DISTRIBUTED_SECURITY_ON
+/**
+ * @brief Enable or disable the Zigbee distributed network.
+ *
+ * @param[in] enabled The status of Zigbee distribute network
+ */
+void esp_zb_enable_distributed_network(bool enabled);
+
+/**
+ * @brief Allow to setup network as distributed when started
+ *
+ */
+void esp_zb_zdo_setup_network_as_distributed(void);
+
+/**
+ * @brief Check if the current network is a distributed security network
+ *
+ * @return - True: The current network is distributed, otherwise it is not.
+ */
+bool esp_zb_network_is_distributed(void);
+#endif
+
+/**
+ * @brief Set the sleep threshold on the device. When the scheduler detects that the device can enter sleep mode, it will notify the application with the signal ESP_ZB_COMMON_SIGNAL_CAN_SLEEP.
+ * The device cannot enter sleep mode when the sleep interval is less than this threshold.
+ * Default sleep threshold is 20 milliseconds, beacuse do not sleep when it is less then 1 Beacon Interval to wake up.
+ *
+ * @param[in] threshold_ms Sleep threshold in milliseconds
+ *
+ * @return ESP_OK if new threshold is valid and applied.
+ * @return ESP_FAIL if the user attempts to set a threshold greater than ESP_ZB_SLEEP_MAXIMUM_THRESHOLD_MS or less than ESP_ZB_SLEEP_MINIMUM_THRESHOLD_MS.
+ *
+ */
+esp_err_t esp_zb_sleep_set_threshold(uint32_t threshold_ms);
+
+/**
+* @brief Blocking function responsible for putting device into sleep mode.
+*/
+void esp_zb_sleep_now(void);
+
+/**
+ * @brief Enable the Zigbee sleep.
+ *
+ * @param[in] enable Enable Zigbee Sleep
+ *
+ */
+void esp_zb_sleep_enable(bool enable);
+
+/**
+ * @brief Get Zigbee sleep is enable or not.
+ *
+ * @return TRUE Zigbee sleep is enable.
+ * @return FALSE Zigbee sleep is disable.
+ *
+ */
+bool esp_zb_sleep_is_enable(void);
 
 #ifdef __cplusplus
 }
