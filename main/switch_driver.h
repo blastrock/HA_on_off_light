@@ -3,24 +3,24 @@
  *
  * SPDX-License-Identifier: LicenseRef-Included
  *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  *
- * 2. Redistributions in binary form, except as embedded into a Espressif Systems
- *    integrated circuit in a product or a software update for such product,
- *    must reproduce the above copyright notice, this list of conditions and
- *    the following disclaimer in the documentation and/or other materials
+ * 2. Redistributions in binary form, except as embedded into a Espressif
+ * Systems integrated circuit in a product or a software update for such
+ * product, must reproduce the above copyright notice, this list of conditions
+ * and the following disclaimer in the documentation and/or other materials
  *    provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its contributors
- *    may be used to endorse or promote products derived from this software without
- *    specific prior written permission.
+ *    may be used to endorse or promote products derived from this software
+ * without specific prior written permission.
  *
- * 4. Any software provided in binary form under this license must not be reverse
- *    engineered, decompiled, modified and/or disassembled.
+ * 4. Any software provided in binary form under this license must not be
+ * reverse engineered, decompiled, modified and/or disassembled.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -39,31 +39,38 @@
 #include "driver/gpio.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/* user should configure which I/O port as toggle switch input, default is GPIO9 */
-#define GPIO_INPUT_IO_TOGGLE_SWITCH  GPIO_NUM_9
+  /* user should configure which I/O port as toggle switch input, default is
+   * GPIO9
+   */
+#define GPIO_INPUT_IO_TOGGLE_SWITCH GPIO_NUM_9
+// #define GPIO_INPUT_IO_TOGGLE_SWITCH GPIO_NUM_3
 
 /* config button level depends on the pull up/down setting
    push button level is on level = 1 when pull-down enable
    push button level is on level = 0 when pull-up enable
 */
-#define GPIO_INPUT_LEVEL_ON     0
+#define GPIO_INPUT_LEVEL_ON 0
 
 #define ESP_INTR_FLAG_DEFAULT 0
 
-#define PAIR_SIZE(TYPE_STR_PAIR) (sizeof(TYPE_STR_PAIR) / sizeof(TYPE_STR_PAIR[0]))
+#define PAIR_SIZE(TYPE_STR_PAIR) \
+  (sizeof(TYPE_STR_PAIR) / sizeof(TYPE_STR_PAIR[0]))
 
-typedef enum {
+  typedef enum
+  {
     SWITCH_IDLE,
     SWITCH_PRESS_ARMED,
     SWITCH_PRESS_DETECTED,
     SWITCH_PRESSED,
     SWITCH_RELEASE_DETECTED,
-} switch_state_t;
+  } switch_state_t;
 
-typedef enum {
+  typedef enum
+  {
     SWITCH_ON_CONTROL,
     SWITCH_OFF_CONTROL,
     SWITCH_ONOFF_TOGGLE_CONTROL,
@@ -71,23 +78,29 @@ typedef enum {
     SWITCH_LEVEL_DOWN_CONTROL,
     SWITCH_LEVEL_CYCLE_CONTROL,
     SWITCH_COLOR_CONTROL,
-} switch_func_t;
+  } switch_func_t;
 
-typedef struct {
+  typedef struct
+  {
     uint32_t pin;
     switch_func_t func;
-} switch_func_pair_t;
+  } switch_func_pair_t;
 
-typedef void (*esp_switch_callback_t)(switch_func_pair_t *param);
+  typedef void (*esp_switch_callback_t)(switch_func_pair_t* param);
 
-/**
- * @brief init function for switch and callback setup
- *
- * @param button_func_pair      pointer of the button pair.
- * @param button_num            number of button pair.
- * @param cb                    callback pointer.
- */
-bool switch_driver_init(switch_func_pair_t *button_func_pair, uint8_t button_num, esp_switch_callback_t cb);
+  /**
+   * @brief init function for switch and callback setup
+   *
+   * @param button_func_pair      pointer of the button pair.
+   * @param button_num            number of button pair.
+   * @param cb                    callback pointer.
+   */
+  bool switch_driver_init(
+      switch_func_pair_t* button_func_pair,
+      uint8_t button_num,
+      esp_switch_callback_t cb);
+
+  void check_gpio(switch_func_pair_t* button_func_pair, uint8_t button_num);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -15,26 +15,26 @@
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "ha/esp_zigbee_ha_standard.h"
 #include "nvs_flash.h"
 #include "string.h"
 #include "zcl/esp_zigbee_zcl_common.h"
+#ifdef CONFIG_PM_ENABLE
+#include "esp_pm.h"
+#include "esp_private/esp_clk.h"
+#endif
 
-char modelid[] = {
-    5, 'P', 'r', 'o', 'u', 't'
-    // 6, 'T', 'S', '0', '0', '4', '4',
-    //  14, 'A', 'd', 'u', 'r', 'o', 'l', 'i', 'g', 'h', 't', '_', 'N', 'C',
-    //  'C'};
-    //  12, 'G', 'r', 'e', 'e', 'n', 'P', 'o', 'w', 'e', 'r', '_', '3'
-};
-char manufname[] = {7, 'L', 'e', 'G', 'l', 'a', 'n', 'd'};
+char modelid[] = {5, 'P', 'l', 'o', 'u', 'f'};
+char manufname[] = {2, 'L', 'e'};
 
 #if !defined ZB_ED_ROLE
 #error Define ZB_ED_ROLE in idf.py menuconfig to compile light switch (End Device) source code.
 #endif
 
-static const char* TAG = "ESP_HA_ON_OFF_SWITCH";
+static const char* TAG = "plouf";
 
 static switch_func_pair_t button_func_pair[] = {
     {GPIO_INPUT_IO_TOGGLE_SWITCH, SWITCH_ONOFF_TOGGLE_CONTROL}};
@@ -60,7 +60,7 @@ static void esp_zb_buttons_handler(switch_func_pair_t* button_func_pair)
     // cmd_req.data_type = ESP_ZB_ZCL_ATTR_TYPE_NULL;
     ESP_EARLY_LOGI(TAG, "Send 'on_off toggle' command");
     // esp_zb_zcl_custom_cluster_cmd_req(&cmd_req);
-    esp_zb_zcl_on_off_cmd_req(&cmd_req);
+    // esp_zb_zcl_on_off_cmd_req(&cmd_req);
   }
   break;
   default:
@@ -89,24 +89,28 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t* signal_struct)
 
   switch (sig_type)
   {
+  case ESP_ZB_ZDO_SIGNAL_SKIP_STARTUP:
+    ESP_LOGI(TAG, "Zigbee stack initialized");
+    esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_INITIALIZATION);
+    break;
   case ESP_ZB_BDB_SIGNAL_DEVICE_FIRST_START:
   case ESP_ZB_BDB_SIGNAL_DEVICE_REBOOT:
-  case ESP_ZB_BDB_SIGNAL_STEERING:
-    if (err_status != ESP_OK)
+    if (err_status == ESP_OK)
     {
-      ESP_LOGW(
-          TAG,
-          "Stack %s failure with %s status, steering",
-          esp_zb_zdo_signal_to_string(sig_type),
-          esp_err_to_name(err_status));
-      esp_zb_scheduler_alarm(
-          (esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
-          ESP_ZB_BDB_MODE_NETWORK_STEERING,
-          1000);
+      ESP_LOGI(TAG, "Start network steering");
+      esp_zb_bdb_start_top_level_commissioning(
+          ESP_ZB_BDB_MODE_NETWORK_STEERING);
     }
     else
     {
-      /* device auto start successfully and on a formed network */
+      /* commissioning failed */
+      ESP_LOGW(
+          TAG, "Failed to initialize Zigbee stack (status: %d)", err_status);
+    }
+    break;
+  case ESP_ZB_BDB_SIGNAL_STEERING:
+    if (err_status == ESP_OK)
+    {
       esp_zb_ieee_addr_t extended_pan_id;
       esp_zb_get_extended_pan_id(extended_pan_id);
       ESP_LOGI(
@@ -125,6 +129,15 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t* signal_struct)
           esp_zb_get_pan_id(),
           esp_zb_get_current_channel());
     }
+    else
+    {
+      ESP_LOGI(
+          TAG, "Network steering was not successful (status: %d)", err_status);
+      esp_zb_scheduler_alarm(
+          (esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
+          ESP_ZB_BDB_MODE_NETWORK_STEERING,
+          1000);
+    }
     break;
   case ESP_ZB_ZDO_SIGNAL_LEAVE:
     leave_params =
@@ -134,9 +147,36 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t* signal_struct)
       ESP_LOGI(TAG, "Reset device");
     }
     break;
+  case ESP_ZB_COMMON_SIGNAL_CAN_SLEEP:
+    ESP_ERROR_CHECK(
+        gpio_wakeup_enable(GPIO_INPUT_IO_TOGGLE_SWITCH, GPIO_INTR_LOW_LEVEL));
+    esp_zb_sleep_now();
+    // esp_light_sleep_start();
+    ESP_LOGI(TAG, "wake up cause %d", esp_sleep_get_wakeup_cause());
+
+    if (esp_sleep_get_wakeup_cause() & ESP_SLEEP_WAKEUP_GPIO)
+      check_gpio(button_func_pair, PAIR_SIZE(button_func_pair));
+    break;
   default:
     break;
   }
+}
+
+static esp_err_t esp_zb_power_save_init(void)
+{
+  esp_err_t rc = ESP_OK;
+#ifdef CONFIG_PM_ENABLE
+  int cur_cpu_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+  esp_pm_config_t pm_config = {
+    .max_freq_mhz = cur_cpu_freq_mhz,
+    .min_freq_mhz = cur_cpu_freq_mhz,
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+    .light_sleep_enable = true
+#endif
+  };
+  rc = esp_pm_configure(&pm_config);
+#endif
+  return rc;
 }
 
 static esp_err_t zb_attribute_reporting_handler(
@@ -238,9 +278,12 @@ static void esp_zb_task(void* pvParameters)
 {
   /* initialize Zigbee stack */
   esp_zb_cfg_t zb_nwk_cfg = ESP_ZB_ZED_CONFIG();
+  /* Enable zigbee light sleep */
+  esp_zb_sleep_enable(true);
+  ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
   esp_zb_init(&zb_nwk_cfg);
-  esp_zb_ieee_addr_t addr = {0x00, 0x00, 0x51, 0x09, 0x00, 0x00, 0x00, 0x00};
-  esp_zb_set_long_address(addr);
+  //   esp_zb_ieee_addr_t addr = {0x00, 0x00, 0x51, 0x09, 0x00, 0x00, 0x00,
+  //   0x00}; esp_zb_set_long_address(addr);
   uint8_t test_attr;
   test_attr = 0;
   /* basic cluster create with fully customized */
@@ -298,11 +341,16 @@ static void esp_zb_task(void* pvParameters)
       HA_ONOFF_SWITCH_ENDPOINT,
       ESP_ZB_AF_HA_PROFILE_ID,
       ESP_ZB_HA_ON_OFF_SWITCH_DEVICE_ID);
-  esp_zb_device_register(esp_zb_ep_list);
+  // esp_zb_device_register(esp_zb_ep_list);
+
+  esp_zb_on_off_light_cfg_t light_cfg = ESP_ZB_DEFAULT_ON_OFF_LIGHT_CONFIG();
+  esp_zb_ep_list_t* esp_zb_on_off_light_ep =
+      esp_zb_on_off_light_ep_create(2, &light_cfg);
+  esp_zb_device_register(esp_zb_on_off_light_ep);
   esp_zb_core_action_handler_register(zb_action_handler);
   esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
-  esp_zb_set_secondary_network_channel_set(ESP_ZB_SECONDARY_CHANNEL_MASK);
-  ESP_ERROR_CHECK(esp_zb_start(true));
+  // esp_zb_set_secondary_network_channel_set(ESP_ZB_SECONDARY_CHANNEL_MASK);
+  ESP_ERROR_CHECK(esp_zb_start(false));
   esp_zb_main_loop_iteration();
 }
 
@@ -313,8 +361,11 @@ void app_main(void)
       .host_config = ESP_ZB_DEFAULT_HOST_CONFIG(),
   };
   ESP_ERROR_CHECK(nvs_flash_init());
+  /* esp zigbee light sleep initialization*/
+  ESP_ERROR_CHECK(esp_zb_power_save_init());
   ESP_ERROR_CHECK(esp_zb_platform_config(&config));
   switch_driver_init(
       button_func_pair, PAIR_SIZE(button_func_pair), esp_zb_buttons_handler);
+
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
 }

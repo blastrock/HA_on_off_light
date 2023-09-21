@@ -5,5 +5,9 @@
     "board/esp32c6-bridge.cfg"
   ],
   "idf.port": "/dev/ttyUSB0",
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "files.associations": {
+    "*.js": "javascriptreact",
+    "esp_sleep.h": "c"
+  }
 }
