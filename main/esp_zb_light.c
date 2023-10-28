@@ -12,6 +12,7 @@
  * CONDITIONS OF ANY KIND, either express or implied.
  */
 #include "esp_zb_light.h"
+#include "driver/rtc_io.h"
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -38,6 +39,7 @@ static const char* TAG = "plouf";
 
 static switch_func_pair_t button_func_pair[] = {
     {GPIO_INPUT_IO_TOGGLE_SWITCH, SWITCH_ONOFF_TOGGLE_CONTROL}};
+bool pendingAction;
 
 static void esp_zb_buttons_handler(switch_func_pair_t* button_func_pair)
 {
@@ -60,7 +62,7 @@ static void esp_zb_buttons_handler(switch_func_pair_t* button_func_pair)
     // cmd_req.data_type = ESP_ZB_ZCL_ATTR_TYPE_NULL;
     ESP_EARLY_LOGI(TAG, "Send 'on_off toggle' command");
     // esp_zb_zcl_custom_cluster_cmd_req(&cmd_req);
-    // esp_zb_zcl_on_off_cmd_req(&cmd_req);
+    esp_zb_zcl_on_off_cmd_req(&cmd_req);
   }
   break;
   default:
@@ -128,6 +130,12 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t* signal_struct)
           extended_pan_id[0],
           esp_zb_get_pan_id(),
           esp_zb_get_current_channel());
+
+      if (pendingAction)
+      {
+        ESP_LOGI(TAG, "pending action to send!");
+        esp_zb_buttons_handler(&button_func_pair[0]);
+      }
     }
     else
     {
@@ -148,14 +156,19 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t* signal_struct)
     }
     break;
   case ESP_ZB_COMMON_SIGNAL_CAN_SLEEP:
-    ESP_ERROR_CHECK(
-        gpio_wakeup_enable(GPIO_INPUT_IO_TOGGLE_SWITCH, GPIO_INTR_LOW_LEVEL));
+    //  ESP_ERROR_CHECK(
+    //      gpio_wakeup_enable(GPIO_INPUT_IO_TOGGLE_SWITCH,
+    //      GPIO_INTR_LOW_LEVEL));
+    ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(
+        1ULL << GPIO_INPUT_IO_TOGGLE_SWITCH, ESP_EXT1_WAKEUP_ANY_HIGH));
+    rtc_gpio_pullup_dis(GPIO_INPUT_IO_TOGGLE_SWITCH);
+    rtc_gpio_pulldown_en(GPIO_INPUT_IO_TOGGLE_SWITCH);
     esp_zb_sleep_now();
     // esp_light_sleep_start();
     ESP_LOGI(TAG, "wake up cause %d", esp_sleep_get_wakeup_cause());
 
-    if (esp_sleep_get_wakeup_cause() & ESP_SLEEP_WAKEUP_GPIO)
-      check_gpio(button_func_pair, PAIR_SIZE(button_func_pair));
+    // if (esp_sleep_get_wakeup_cause() & ESP_SLEEP_WAKEUP_GPIO)
+    //   check_gpio(button_func_pair, PAIR_SIZE(button_func_pair));
     break;
   default:
     break;
@@ -280,7 +293,6 @@ static void esp_zb_task(void* pvParameters)
   esp_zb_cfg_t zb_nwk_cfg = ESP_ZB_ZED_CONFIG();
   /* Enable zigbee light sleep */
   esp_zb_sleep_enable(true);
-  ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
   esp_zb_init(&zb_nwk_cfg);
   //   esp_zb_ieee_addr_t addr = {0x00, 0x00, 0x51, 0x09, 0x00, 0x00, 0x00,
   //   0x00}; esp_zb_set_long_address(addr);
@@ -346,7 +358,8 @@ static void esp_zb_task(void* pvParameters)
   esp_zb_on_off_light_cfg_t light_cfg = ESP_ZB_DEFAULT_ON_OFF_LIGHT_CONFIG();
   esp_zb_ep_list_t* esp_zb_on_off_light_ep =
       esp_zb_on_off_light_ep_create(2, &light_cfg);
-  esp_zb_device_register(esp_zb_on_off_light_ep);
+  // esp_zb_device_register(esp_zb_on_off_light_ep);
+  esp_zb_device_register(esp_zb_ep_list);
   esp_zb_core_action_handler_register(zb_action_handler);
   esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
   // esp_zb_set_secondary_network_channel_set(ESP_ZB_SECONDARY_CHANNEL_MASK);
@@ -354,8 +367,54 @@ static void esp_zb_task(void* pvParameters)
   esp_zb_main_loop_iteration();
 }
 
+void example_deep_sleep_register_gpio_wakeup(void)
+{
+  // const gpio_config_t config = {
+  //     .pin_bit_mask = BIT(0),
+  //     .mode = GPIO_MODE_INPUT,
+  // };
+
+  // ESP_ERROR_CHECK(gpio_config(&config));
+  ESP_ERROR_CHECK(
+      esp_deep_sleep_enable_gpio_wakeup(BIT(0), ESP_GPIO_WAKEUP_GPIO_HIGH));
+}
+
+static void deep_sleep_task(void* args)
+{
+  switch (esp_sleep_get_wakeup_cause())
+  {
+  case ESP_SLEEP_WAKEUP_GPIO:
+  {
+    uint64_t wakeup_pin_mask = esp_sleep_get_gpio_wakeup_status();
+    if (wakeup_pin_mask != 0)
+    {
+      int pin = __builtin_ffsll(wakeup_pin_mask) - 1;
+      ESP_LOGI(TAG, "Wake up from GPIO %d", pin);
+
+      pendingAction = true;
+    }
+    else
+    {
+      ESP_LOGI(TAG, "Wake up from GPIO unknown %lld", wakeup_pin_mask);
+    }
+    break;
+  }
+  default:
+    ESP_LOGI(TAG, "unknown wake up reason: %d", esp_sleep_get_wakeup_cause());
+  }
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+  ESP_EARLY_LOGI(TAG, "Entering deep sleep");
+
+  // enter deep sleep
+  esp_deep_sleep_start();
+}
+
 void app_main(void)
 {
+  uint64_t wakeup_pin_mask = esp_sleep_get_gpio_wakeup_status();
+  ESP_EARLY_LOGI(TAG, "wake up early %lld", wakeup_pin_mask);
+
   esp_zb_platform_config_t config = {
       .radio_config = ESP_ZB_DEFAULT_RADIO_CONFIG(),
       .host_config = ESP_ZB_DEFAULT_HOST_CONFIG(),
@@ -364,8 +423,26 @@ void app_main(void)
   /* esp zigbee light sleep initialization*/
   ESP_ERROR_CHECK(esp_zb_power_save_init());
   ESP_ERROR_CHECK(esp_zb_platform_config(&config));
+  // example_deep_sleep_register_gpio_wakeup();
+  //   ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
   switch_driver_init(
       button_func_pair, PAIR_SIZE(button_func_pair), esp_zb_buttons_handler);
 
+  ESP_ERROR_CHECK(
+      esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON));
+  ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(
+      1ULL << GPIO_INPUT_IO_TOGGLE_SWITCH, ESP_EXT1_WAKEUP_ANY_HIGH));
+  rtc_gpio_pullup_dis(GPIO_INPUT_IO_TOGGLE_SWITCH);
+  rtc_gpio_pulldown_en(GPIO_INPUT_IO_TOGGLE_SWITCH);
+  // ESP_ERROR_CHECK(
+  //     gpio_wakeup_enable(GPIO_INPUT_IO_TOGGLE_SWITCH, GPIO_INTR_HIGH_LEVEL));
+
+  // while (true)
+  // {
+  //   esp_light_sleep_start();
+  //   ESP_LOGI(TAG, "wake up cause %d", esp_sleep_get_wakeup_cause());
+  // }
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
+
+  // xTaskCreate(deep_sleep_task, "deep_sleep_task", 4096, NULL, 6, NULL);
 }

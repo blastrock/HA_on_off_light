@@ -37,6 +37,7 @@
 
 #include "switch_driver.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -65,6 +66,8 @@ static const char* TAG = "ESP_ZB_SWITCH";
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
+  ESP_EARLY_LOGI(
+      TAG, "GPIO ISR HANDLER cause %d", esp_sleep_get_wakeup_cause());
   xQueueSendFromISR(gpio_evt_queue, (switch_func_pair_t*)arg, NULL);
 }
 
@@ -85,6 +88,7 @@ void check_gpio(switch_func_pair_t* button_func_pair, uint8_t button_num)
  */
 static void switch_driver_gpios_intr_enabled(bool enabled)
 {
+  ESP_EARLY_LOGI(TAG, "gpio intr: %d", (int)enabled);
   for (int i = 0; i < switch_num; ++i)
   {
     if (enabled)
@@ -116,10 +120,12 @@ static void switch_driver_button_detected(void* arg)
      * button_func_pair */
     if (xQueueReceive(gpio_evt_queue, &button_func_pair, portMAX_DELAY))
     {
+      ESP_EARLY_LOGI(TAG, "queue event");
       io_num = button_func_pair.pin;
       switch_driver_gpios_intr_enabled(false);
       evt_flag = true;
     }
+    ESP_EARLY_LOGI(TAG, "loop resume");
     while (evt_flag)
     {
       bool value = gpio_get_level(io_num);
@@ -171,11 +177,13 @@ static bool switch_driver_gpio_init(
   {
     pin_bit_mask |= (1ULL << (button_func_pair + i)->pin);
   }
-  /* interrupt of falling edge (nope) */
-  io_conf.intr_type = GPIO_INTR_LOW_LEVEL;
+  /* interrupt of falling edge */
+  // io_conf.intr_type = GPIO_INTR_NEGEDGE;
+  io_conf.intr_type = GPIO_INTR_POSEDGE;
   io_conf.pin_bit_mask = pin_bit_mask;
   io_conf.mode = GPIO_MODE_INPUT;
-  io_conf.pull_up_en = 1;
+  io_conf.pull_down_en = 0;
+  io_conf.pull_up_en = 0;
   /* configure GPIO with the given settings */
   gpio_config(&io_conf);
   /* create a queue to handle gpio event from isr */
