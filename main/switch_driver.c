@@ -36,6 +36,7 @@
  */
 
 #include "switch_driver.h"
+#include "driver/rtc_io.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
@@ -62,10 +63,13 @@ static switch_func_pair_t* switch_func_pair;
 static esp_switch_callback_t func_ptr;
 /* which button is pressed */
 static uint8_t switch_num;
-static const char* TAG = "ESP_ZB_SWITCH";
+static const char* TAG = "switch";
+
+static void switch_driver_gpios_intr_enabled(bool enabled);
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
+  switch_driver_gpios_intr_enabled(false);
   ESP_EARLY_LOGI(
       TAG, "GPIO ISR HANDLER cause %d", esp_sleep_get_wakeup_cause());
   xQueueSendFromISR(gpio_evt_queue, (switch_func_pair_t*)arg, NULL);
@@ -88,7 +92,7 @@ void check_gpio(switch_func_pair_t* button_func_pair, uint8_t button_num)
  */
 static void switch_driver_gpios_intr_enabled(bool enabled)
 {
-  ESP_EARLY_LOGI(TAG, "gpio intr: %d", (int)enabled);
+  ESP_EARLY_LOGI(TAG, "GPIO interrupts: %s", enabled ? "on" : "off");
   for (int i = 0; i < switch_num; ++i)
   {
     if (enabled)
@@ -120,20 +124,23 @@ static void switch_driver_button_detected(void* arg)
      * button_func_pair */
     if (xQueueReceive(gpio_evt_queue, &button_func_pair, portMAX_DELAY))
     {
-      ESP_EARLY_LOGI(TAG, "queue event");
+      ESP_LOGI(TAG, "queue event");
       io_num = button_func_pair.pin;
-      switch_driver_gpios_intr_enabled(false);
+      // switch_driver_gpios_intr_enabled(false);
       evt_flag = true;
     }
-    ESP_EARLY_LOGI(TAG, "loop resume");
+    ESP_LOGI(TAG, "loop resume");
     while (evt_flag)
     {
       bool value = gpio_get_level(io_num);
+      ESP_LOGI(TAG, "state is %d, value is %d", switch_state, value);
       switch (switch_state)
       {
       case SWITCH_IDLE:
         switch_state = (value == GPIO_INPUT_LEVEL_ON) ? SWITCH_PRESS_DETECTED
                                                       : SWITCH_IDLE;
+        if (switch_state == SWITCH_IDLE)
+          ESP_LOGI(TAG, "stayed idle!");
         break;
       case SWITCH_PRESS_DETECTED:
         switch_state = (value == GPIO_INPUT_LEVEL_ON) ? SWITCH_PRESS_DETECTED
@@ -149,6 +156,7 @@ static void switch_driver_button_detected(void* arg)
       }
       if (switch_state == SWITCH_IDLE)
       {
+        ESP_LOGI(TAG, "back to sleep");
         switch_driver_gpios_intr_enabled(true);
         evt_flag = false;
         break;
@@ -177,15 +185,20 @@ static bool switch_driver_gpio_init(
   {
     pin_bit_mask |= (1ULL << (button_func_pair + i)->pin);
   }
-  /* interrupt of falling edge */
-  // io_conf.intr_type = GPIO_INTR_NEGEDGE;
-  io_conf.intr_type = GPIO_INTR_POSEDGE;
+  /* interrupt on high level */
+  io_conf.intr_type = GPIO_INTR_HIGH_LEVEL;
   io_conf.pin_bit_mask = pin_bit_mask;
   io_conf.mode = GPIO_MODE_INPUT;
-  io_conf.pull_down_en = 0;
+  io_conf.pull_down_en = 1;
   io_conf.pull_up_en = 0;
   /* configure GPIO with the given settings */
   gpio_config(&io_conf);
+  /* configure RTC wake up */
+  ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(
+      1ULL << GPIO_INPUT_IO_TOGGLE_SWITCH, ESP_EXT1_WAKEUP_ANY_HIGH));
+  rtc_gpio_pullup_dis(GPIO_INPUT_IO_TOGGLE_SWITCH);
+  rtc_gpio_pulldown_en(GPIO_INPUT_IO_TOGGLE_SWITCH);
+
   /* create a queue to handle gpio event from isr */
   gpio_evt_queue = xQueueCreate(10, sizeof(switch_func_pair_t));
   if (gpio_evt_queue == 0)
@@ -197,13 +210,13 @@ static bool switch_driver_gpio_init(
   xTaskCreate(
       switch_driver_button_detected, "button_detected", 2048, NULL, 10, NULL);
   /* install gpio isr service */
-  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
   for (int i = 0; i < button_num; ++i)
   {
-    gpio_isr_handler_add(
+    ESP_ERROR_CHECK(gpio_isr_handler_add(
         (button_func_pair + i)->pin,
         gpio_isr_handler,
-        (void*)(button_func_pair + i));
+        (void*)(button_func_pair + i)));
   }
   return true;
 }
