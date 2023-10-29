@@ -189,8 +189,8 @@ static void power_save_init(void)
 #endif
   };
   ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
-  ESP_ERROR_CHECK(
-      esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON));
+  // ESP_ERROR_CHECK(
+  //     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON));
 #endif
 }
 
@@ -267,6 +267,7 @@ static esp_err_t zb_configure_report_resp_handler(
 static esp_err_t zb_action_handler(
     esp_zb_core_action_callback_id_t callback_id, const void* message)
 {
+  ESP_LOGI(TAG, "Action handle called with callback 0x%x", callback_id);
   esp_err_t ret = ESP_OK;
   switch (callback_id)
   {
@@ -360,8 +361,8 @@ static void esp_zb_task(void* pvParameters)
   esp_zb_on_off_light_cfg_t light_cfg = ESP_ZB_DEFAULT_ON_OFF_LIGHT_CONFIG();
   esp_zb_ep_list_t* esp_zb_on_off_light_ep =
       esp_zb_on_off_light_ep_create(2, &light_cfg);
-  // esp_zb_device_register(esp_zb_on_off_light_ep);
-  ESP_ERROR_CHECK(esp_zb_device_register(esp_zb_ep_list));
+  esp_zb_device_register(esp_zb_on_off_light_ep);
+  // ESP_ERROR_CHECK(esp_zb_device_register(esp_zb_ep_list));
   esp_zb_core_action_handler_register(zb_action_handler);
   ESP_ERROR_CHECK(
       esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK));
@@ -416,14 +417,14 @@ void app_main(void)
   ESP_ERROR_CHECK(esp_zb_platform_config(&config));
   // ESP_ERROR_CHECK(
   //     esp_deep_sleep_enable_gpio_wakeup(BIT(0), ESP_GPIO_WAKEUP_GPIO_HIGH));
-  if (!switch_driver_init(
-          button_func_pair,
-          PAIR_SIZE(button_func_pair),
-          esp_zb_buttons_handler))
-  {
-    ESP_LOGI(TAG, "Failed to set up GPIOs");
-    abort();
-  }
+  // if (!switch_driver_init(
+  //         button_func_pair,
+  //         PAIR_SIZE(button_func_pair),
+  //         esp_zb_buttons_handler))
+  // {
+  //   ESP_LOGI(TAG, "Failed to set up GPIOs");
+  //   abort();
+  // }
 
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
 
