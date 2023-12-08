@@ -8,6 +8,7 @@
   "idf.flashType": "UART",
   "files.associations": {
     "*.js": "javascriptreact",
-    "esp_sleep.h": "c"
+    "esp_sleep.h": "c",
+    "functional": "c"
   }
 }

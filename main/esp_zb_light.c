@@ -62,7 +62,7 @@ static void esp_zb_buttons_handler(switch_func_pair_t* button_func_pair)
     // cmd_req.data_type = ESP_ZB_ZCL_ATTR_TYPE_NULL;
     ESP_EARLY_LOGI(TAG, "Send 'on_off toggle' command");
     // esp_zb_zcl_custom_cluster_cmd_req(&cmd_req);
-    esp_zb_zcl_on_off_cmd_req(&cmd_req);
+    // esp_zb_zcl_on_off_cmd_req(&cmd_req);
     ESP_EARLY_LOGI(TAG, "done!");
   }
   break;
@@ -238,10 +238,11 @@ static esp_err_t zb_read_attr_resp_handler(
       "type(0x%x), value(%d)",
       message->info.status,
       message->info.cluster,
-      message->attribute.id,
-      message->attribute.data.type,
-      message->attribute.data.value ? *(uint8_t*)message->attribute.data.value
-                                    : 0);
+      message->variables->attribute.id,
+      message->variables->attribute.data.type,
+      message->variables->attribute.data.value
+          ? *(uint8_t*)message->variables->attribute.data.value
+          : 0);
   return ESP_OK;
 }
 
@@ -260,7 +261,7 @@ static esp_err_t zb_configure_report_resp_handler(
       "Configure report response: status(%d), cluster(0x%x), attribute(0x%x)",
       message->info.status,
       message->info.cluster,
-      message->attribute_id);
+      message->variables->attribute_id);
   return ESP_OK;
 }
 
@@ -371,36 +372,37 @@ static void esp_zb_task(void* pvParameters)
   esp_zb_main_loop_iteration();
 }
 
-static void deep_sleep_task(void* args)
-{
-  switch (esp_sleep_get_wakeup_cause())
-  {
-  case ESP_SLEEP_WAKEUP_GPIO:
-  {
-    uint64_t wakeup_pin_mask = esp_sleep_get_gpio_wakeup_status();
-    if (wakeup_pin_mask != 0)
-    {
-      int pin = __builtin_ffsll(wakeup_pin_mask) - 1;
-      ESP_LOGI(TAG, "Wake up from GPIO %d", pin);
+// static void deep_sleep_task(void* args)
+// {
+//   switch (esp_sleep_get_wakeup_cause())
+//   {
+//   case ESP_SLEEP_WAKEUP_GPIO:
+//   {
+//     uint64_t wakeup_pin_mask = esp_sleep_get_gpio_wakeup_status();
+//     if (wakeup_pin_mask != 0)
+//     {
+//       int pin = __builtin_ffsll(wakeup_pin_mask) - 1;
+//       ESP_LOGI(TAG, "Wake up from GPIO %d", pin);
 
-      pendingAction = true;
-    }
-    else
-    {
-      ESP_LOGI(TAG, "Wake up from GPIO unknown %lld", wakeup_pin_mask);
-    }
-    break;
-  }
-  default:
-    ESP_LOGI(TAG, "unknown wake up reason: %d", esp_sleep_get_wakeup_cause());
-  }
-  vTaskDelay(10000 / portTICK_PERIOD_MS);
+//       pendingAction = true;
+//     }
+//     else
+//     {
+//       ESP_LOGI(TAG, "Wake up from GPIO unknown %lld", wakeup_pin_mask);
+//     }
+//     break;
+//   }
+//   default:
+//     ESP_LOGI(TAG, "unknown wake up reason: %d",
+//     esp_sleep_get_wakeup_cause());
+//   }
+//   vTaskDelay(10000 / portTICK_PERIOD_MS);
 
-  ESP_EARLY_LOGI(TAG, "Entering deep sleep");
+//   ESP_EARLY_LOGI(TAG, "Entering deep sleep");
 
-  // enter deep sleep
-  esp_deep_sleep_start();
-}
+//   // enter deep sleep
+//   esp_deep_sleep_start();
+// }
 
 void app_main(void)
 {
@@ -417,14 +419,14 @@ void app_main(void)
   ESP_ERROR_CHECK(esp_zb_platform_config(&config));
   // ESP_ERROR_CHECK(
   //     esp_deep_sleep_enable_gpio_wakeup(BIT(0), ESP_GPIO_WAKEUP_GPIO_HIGH));
-  // if (!switch_driver_init(
-  //         button_func_pair,
-  //         PAIR_SIZE(button_func_pair),
-  //         esp_zb_buttons_handler))
-  // {
-  //   ESP_LOGI(TAG, "Failed to set up GPIOs");
-  //   abort();
-  // }
+  if (!switch_driver_init(
+          button_func_pair,
+          PAIR_SIZE(button_func_pair),
+          esp_zb_buttons_handler))
+  {
+    ESP_LOGI(TAG, "Failed to set up GPIOs");
+    abort();
+  }
 
   xTaskCreate(esp_zb_task, "Zigbee_main", 4096, NULL, 5, NULL);
 

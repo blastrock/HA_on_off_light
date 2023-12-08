@@ -161,7 +161,7 @@ static void switch_driver_button_detected(void* arg)
         evt_flag = false;
         break;
       }
-      vTaskDelay(10 / portTICK_PERIOD_MS);
+      // vTaskDelay(10 / portTICK_PERIOD_MS);
     }
   }
 }
