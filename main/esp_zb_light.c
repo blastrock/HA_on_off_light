@@ -22,6 +22,7 @@
 #include "ha/esp_zigbee_ha_standard.h"
 #include "nvs_flash.h"
 #include "string.h"
+#include "zboss_api.h"
 #include "zcl/esp_zigbee_zcl_common.h"
 #ifdef CONFIG_PM_ENABLE
 #include "esp_pm.h"
@@ -62,7 +63,7 @@ static void esp_zb_buttons_handler(switch_func_pair_t* button_func_pair)
     // cmd_req.data_type = ESP_ZB_ZCL_ATTR_TYPE_NULL;
     ESP_EARLY_LOGI(TAG, "Send 'on_off toggle' command");
     // esp_zb_zcl_custom_cluster_cmd_req(&cmd_req);
-    // esp_zb_zcl_on_off_cmd_req(&cmd_req);
+    esp_zb_zcl_on_off_cmd_req(&cmd_req);
     ESP_EARLY_LOGI(TAG, "done!");
   }
   break;
@@ -131,6 +132,8 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t* signal_struct)
           extended_pan_id[0],
           esp_zb_get_pan_id(),
           esp_zb_get_current_channel());
+
+      zb_zdo_pim_set_long_poll_interval(ED_KEEP_ALIVE);
 
       if (pendingAction)
       {

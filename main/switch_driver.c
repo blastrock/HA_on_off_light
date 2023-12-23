@@ -208,7 +208,7 @@ static bool switch_driver_gpio_init(
   }
   /* start gpio task */
   xTaskCreate(
-      switch_driver_button_detected, "button_detected", 2048, NULL, 10, NULL);
+      switch_driver_button_detected, "button_detected", 4096, NULL, 10, NULL);
   /* install gpio isr service */
   ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
   for (int i = 0; i < button_num; ++i)
